@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/typesense/typesense-go/typesense/api"
-	"github.com/typesense/typesense-go/typesense/api/circuit"
+	"github.com/typesense/typesense-go/v2/typesense/api"
+	"github.com/typesense/typesense-go/v2/typesense/api/circuit"
 )
 
 type APIClientInterface interface {
@@ -64,6 +64,22 @@ func (c *Client) Preset(presetName string) PresetInterface {
 	return &preset{apiClient: c.apiClient, presetName: presetName}
 }
 
+func (c *Client) Stopwords() StopwordsInterface {
+	return &stopwords{apiClient: c.apiClient}
+}
+
+func (c *Client) Stopword(stopwordsSetId string) StopwordInterface {
+	return &stopword{apiClient: c.apiClient, stopwordsSetId: stopwordsSetId}
+}
+
+func (c *Client) Stats() StatsInterface {
+	return &stats{apiClient: c.apiClient}
+}
+
+func (c *Client) Metrics() MetricsInterface {
+	return &metrics{apiClient: c.apiClient}
+}
+
 type HTTPError struct {
 	Status int
 	Body   []byte
@@ -114,16 +130,16 @@ func WithServer(serverURL string) ClientOption {
 }
 
 // WithNearestNode sets the Load Balanced endpoint.
-func WithNearestNode(URL string) ClientOption {
+func WithNearestNode(nodeURL string) ClientOption {
 	return func(c *Client) {
-		c.apiConfig.NearestNode = URL
+		c.apiConfig.NearestNode = nodeURL
 	}
 }
 
 // WithNodes sets multiple hostnames to load balance reads & writes across all nodes.
-func WithNodes(URLs []string) ClientOption {
+func WithNodes(nodeURLs []string) ClientOption {
 	return func(c *Client) {
-		c.apiConfig.Nodes = URLs
+		c.apiConfig.Nodes = nodeURLs
 	}
 }
 
@@ -270,7 +286,7 @@ func NewClient(opts ...ClientOption) *Client {
 		)
 		httpClient := circuit.NewHTTPClient(
 			circuit.WithHTTPRequestDoer(
-				NewApiCall(
+				NewAPICall(
 					&http.Client{
 						Timeout: c.apiConfig.ConnectionTimeout,
 					},
