@@ -1,0 +1,50 @@
+name: Test
+
+on:
+  push:
+    paths-ignore:
+      - '**/*.md'
+  pull_request:
+    paths-ignore:
+      - '**/*.md'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start Typesense
+        run: |
+          docker run -d \
+          -p 8108:8108 \
+          --name typesense \
+          -v /tmp/typesense-data:/data \
+          -v /tmp/typesense-analytics-data:/analytics-data \
+          typesense/typesense:30.0.alpha1 \
+          --api-key=test_key \
+          --data-dir=/data \
+          --enable-search-analytics=true \
+          --analytics-dir=/analytics-data \
+          --analytics-flush-interval=60 \
+          --analytics-minute-rate-limit=50 \
+          --enable-cors
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+
+      - name: Install dependencies
+        run: go mod download
+
+      - name: Build
+        run: go build -v ./...
+
+      - name: Run tests
+        env:
+          TYPESENSE_URL: 'http://localhost:8108'
+          TYPESENSE_API_KEY: 'test_key'
+          CGO_ENABLED: 1
+        run: go run gotest.tools/gotestsum@latest --format github-actions -- -tags=integration ./... -race -shuffle=on

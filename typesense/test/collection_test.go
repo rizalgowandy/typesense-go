@@ -8,13 +8,13 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"github.com/typesense/typesense-go/typesense/api"
-	"github.com/typesense/typesense-go/typesense/api/pointer"
+	"github.com/typesense/typesense-go/v4/typesense/api"
+	"github.com/typesense/typesense-go/v4/typesense/api/pointer"
 )
 
 func TestCollectionRetrieve(t *testing.T) {
 	collectionName := createNewCollection(t, "companies")
-	expectedResult := expectedNewCollection(collectionName)
+	expectedResult := expectedNewCollection(t, collectionName)
 
 	result, err := typesenseClient.Collection(collectionName).Retrieve(context.Background())
 	result.CreatedAt = pointer.Int64(0)
@@ -25,7 +25,7 @@ func TestCollectionRetrieve(t *testing.T) {
 
 func TestCollectionDelete(t *testing.T) {
 	collectionName := createNewCollection(t, "companies")
-	expectedResult := expectedNewCollection(collectionName)
+	expectedResult := expectedNewCollection(t, collectionName)
 
 	result, err := typesenseClient.Collection(collectionName).Delete(context.Background())
 	result.CreatedAt = pointer.Int64(0)
@@ -46,6 +46,9 @@ func TestCollectionUpdate(t *testing.T) {
 				Drop: pointer.True(),
 			},
 		},
+		Metadata: &map[string]interface{}{
+			"revision": "2",
+		},
 	}
 
 	result, err := typesenseClient.Collection(collectionName).Update(context.Background(), updateSchema)
@@ -53,4 +56,35 @@ func TestCollectionUpdate(t *testing.T) {
 	require.Equal(t, 1, len(result.Fields))
 	require.Equal(t, "country", result.Fields[0].Name)
 	require.Equal(t, pointer.True(), result.Fields[0].Drop)
+	require.Equal(t, "2", (*result.Metadata)["revision"].(string))
+}
+
+// Updating only the metadata has to leave `fields` out of the request entirely, since
+// Typesense rejects both `"fields":null` and `"fields":[]` with a 400.
+func TestCollectionUpdateMetadataOnly(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		fields []api.Field
+	}{
+		{name: "nil fields", fields: nil},
+		{name: "empty fields", fields: []api.Field{}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			collectionName := createNewCollection(t, "companies")
+
+			result, err := typesenseClient.Collection(collectionName).Update(context.Background(),
+				&api.CollectionUpdateSchema{
+					Fields:   tt.fields,
+					Metadata: &map[string]interface{}{"revision": "2"},
+				})
+			require.NoError(t, err)
+			require.Equal(t, "2", (*result.Metadata)["revision"].(string))
+
+			// Confirm the change reached the collection and left the schema alone.
+			updated, err := typesenseClient.Collection(collectionName).Retrieve(context.Background())
+			require.NoError(t, err)
+			require.Equal(t, "2", (*updated.Metadata)["revision"].(string))
+			require.Len(t, updated.Fields, 3)
+		})
+	}
 }

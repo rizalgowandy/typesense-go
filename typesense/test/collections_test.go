@@ -9,19 +9,18 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/typesense/typesense-go/typesense/api"
-	"github.com/typesense/typesense-go/typesense/api/pointer"
+	"github.com/typesense/typesense-go/v4/typesense/api"
+	"github.com/typesense/typesense-go/v4/typesense/api/pointer"
 )
 
 func TestCollectionCreate(t *testing.T) {
 	collectionName := newUUIDName("companies")
 	schema := newSchema(collectionName)
-	expectedResult := expectedNewCollection(collectionName)
+	expectedResult := expectedNewCollection(t, collectionName)
 
 	result, err := typesenseClient.Collections().Create(context.Background(), schema)
-	result.CreatedAt = pointer.Int64(0)
-
 	require.NoError(t, err)
+	result.CreatedAt = pointer.Int64(0)
 	require.Equal(t, expectedResult, result)
 }
 
@@ -37,7 +36,7 @@ func TestCollectionsRetrieve(t *testing.T) {
 	}
 	expectedResult := map[string]*api.CollectionResponse{}
 	for i := 0; i < total; i++ {
-		expectedResult[collectionNames[i]] = expectedNewCollection(collectionNames[i])
+		expectedResult[collectionNames[i]] = expectedNewCollection(t, collectionNames[i])
 	}
 
 	for _, schema := range schemas {
@@ -45,7 +44,7 @@ func TestCollectionsRetrieve(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	result, err := typesenseClient.Collections().Retrieve(context.Background())
+	result, err := typesenseClient.Collections().Retrieve(context.Background(), &api.GetCollectionsParams{})
 
 	require.NoError(t, err)
 	require.True(t, len(result) >= total, "number of collections is invalid")
@@ -58,5 +57,14 @@ func TestCollectionsRetrieve(t *testing.T) {
 
 	for k, v := range expectedResult {
 		assert.Equal(t, v, resultMap[k])
+	}
+
+	exclude := "fields"
+	excluded, err := typesenseClient.Collections().Retrieve(context.Background(), &api.GetCollectionsParams{
+		ExcludeFields: &exclude,
+	})
+	require.NoError(t, err)
+	for _, collection := range excluded {
+		assert.Empty(t, collection.Fields)
 	}
 }

@@ -5,17 +5,15 @@ import (
 	"context"
 	"errors"
 	"io"
-	"io/ioutil"
 	"net/http"
-	"reflect"
 	"strings"
 	"testing"
 
-	"go.uber.org/mock/gomock"
 	"github.com/stretchr/testify/assert"
-	"github.com/typesense/typesense-go/typesense/api"
-	"github.com/typesense/typesense-go/typesense/api/pointer"
-	"github.com/typesense/typesense-go/typesense/mocks"
+	"github.com/typesense/typesense-go/v4/typesense/api"
+	"github.com/typesense/typesense-go/v4/typesense/api/pointer"
+	"github.com/typesense/typesense-go/v4/typesense/mocks"
+	"go.uber.org/mock/gomock"
 )
 
 type eqReaderMatcher struct {
@@ -23,7 +21,7 @@ type eqReaderMatcher struct {
 }
 
 func eqReader(r io.Reader) gomock.Matcher {
-	allBytes, err := ioutil.ReadAll(r)
+	allBytes, err := io.ReadAll(r)
 	if err != nil {
 		panic(err)
 	}
@@ -31,15 +29,15 @@ func eqReader(r io.Reader) gomock.Matcher {
 }
 
 func (m *eqReaderMatcher) Matches(x interface{}) bool {
-	if _, ok := x.(io.Reader); !ok {
+	r, ok := x.(io.Reader)
+	if !ok {
 		return false
 	}
-	r := x.(io.Reader)
-	allBytes, err := ioutil.ReadAll(r)
+	allBytes, err := io.ReadAll(r)
 	if err != nil {
 		panic(err)
 	}
-	return reflect.DeepEqual(allBytes, m.readerBytes)
+	return bytes.Equal(allBytes, m.readerBytes)
 }
 
 func (m *eqReaderMatcher) String() string {
@@ -48,7 +46,7 @@ func (m *eqReaderMatcher) String() string {
 
 func TestDocumentsImportWithOneDocument(t *testing.T) {
 	expectedParams := &api.ImportDocumentsParams{
-		Action:    pointer.String("create"),
+		Action:    pointer.Any(api.Create),
 		BatchSize: pointer.Int(40),
 	}
 	expectedBody := strings.NewReader(`{"id":"123","companyName":"Stark Industries","numEmployees":5215,"country":"USA"}` + "\n")
@@ -66,7 +64,7 @@ func TestDocumentsImportWithOneDocument(t *testing.T) {
 			"companies", expectedParams, "application/octet-stream", eqReader(expectedBody)).
 		Return(&http.Response{
 			StatusCode: http.StatusOK,
-			Body:       ioutil.NopCloser(strings.NewReader(expectedResultString)),
+			Body:       io.NopCloser(strings.NewReader(expectedResultString)),
 		}, nil).
 		Times(1)
 
@@ -75,7 +73,7 @@ func TestDocumentsImportWithOneDocument(t *testing.T) {
 		createNewDocument(),
 	}
 	params := &api.ImportDocumentsParams{
-		Action:    pointer.String("create"),
+		Action:    pointer.Any(api.Create),
 		BatchSize: pointer.Int(40),
 	}
 	result, err := client.Collection("companies").Documents().Import(context.Background(), documents, params)
@@ -91,7 +89,7 @@ func TestDocumentsImportWithEmptyListReturnsError(t *testing.T) {
 
 	client := NewClient(WithAPIClient(mockAPIClient))
 	params := &api.ImportDocumentsParams{
-		Action:    pointer.String("create"),
+		Action:    pointer.Any(api.Create),
 		BatchSize: pointer.Int(40),
 	}
 	documents := []interface{}{}
@@ -101,7 +99,7 @@ func TestDocumentsImportWithEmptyListReturnsError(t *testing.T) {
 
 func TestDocumentsImportWithOneDocumentAndInvalidResultJsonReturnsError(t *testing.T) {
 	expectedParams := &api.ImportDocumentsParams{
-		Action:    pointer.String("create"),
+		Action:    pointer.Any(api.Create),
 		BatchSize: pointer.Int(40),
 	}
 	expectedBody := strings.NewReader(`{"id":"123","companyName":"Stark Industries","numEmployees":5215,"country":"USA"}` + "\n")
@@ -116,7 +114,7 @@ func TestDocumentsImportWithOneDocumentAndInvalidResultJsonReturnsError(t *testi
 			"companies", expectedParams, "application/octet-stream", eqReader(expectedBody)).
 		Return(&http.Response{
 			StatusCode: http.StatusOK,
-			Body:       ioutil.NopCloser(strings.NewReader(expectedResultString)),
+			Body:       io.NopCloser(strings.NewReader(expectedResultString)),
 		}, nil).
 		Times(1)
 
@@ -125,7 +123,7 @@ func TestDocumentsImportWithOneDocumentAndInvalidResultJsonReturnsError(t *testi
 		createNewDocument(),
 	}
 	params := &api.ImportDocumentsParams{
-		Action:    pointer.String("create"),
+		Action:    pointer.Any(api.Create),
 		BatchSize: pointer.Int(40),
 	}
 	_, err := client.Collection("companies").Documents().Import(context.Background(), documents, params)
@@ -139,7 +137,7 @@ func TestDocumentsImportWithInvalidInputDataReturnsError(t *testing.T) {
 
 	client := NewClient(WithAPIClient(mockAPIClient))
 	params := &api.ImportDocumentsParams{
-		Action:    pointer.String("create"),
+		Action:    pointer.Any(api.Create),
 		BatchSize: pointer.Int(40),
 	}
 	documents := []interface{}{
@@ -162,7 +160,7 @@ func TestDocumentsImportOnApiClientErrorReturnsError(t *testing.T) {
 
 	client := NewClient(WithAPIClient(mockAPIClient))
 	params := &api.ImportDocumentsParams{
-		Action:    pointer.String("create"),
+		Action:    pointer.Any(api.Create),
 		BatchSize: pointer.Int(40),
 	}
 	documents := []interface{}{
@@ -182,13 +180,13 @@ func TestDocumentsImportOnHttpStatusErrorCodeReturnsError(t *testing.T) {
 			"companies", gomock.Any(), "application/octet-stream", gomock.Any()).
 		Return(&http.Response{
 			StatusCode: http.StatusInternalServerError,
-			Body:       ioutil.NopCloser(strings.NewReader("Internal server error")),
+			Body:       io.NopCloser(strings.NewReader("Internal server error")),
 		}, nil).
 		Times(1)
 
 	client := NewClient(WithAPIClient(mockAPIClient))
 	params := &api.ImportDocumentsParams{
-		Action:    pointer.String("create"),
+		Action:    pointer.Any(api.Create),
 		BatchSize: pointer.Int(40),
 	}
 	documents := []interface{}{
@@ -198,17 +196,25 @@ func TestDocumentsImportOnHttpStatusErrorCodeReturnsError(t *testing.T) {
 	assert.NotNil(t, err)
 }
 
-func TestDocumentsImportWithTwoDocuments(t *testing.T) {
-	expectedParams := &api.ImportDocumentsParams{
-		Action:    pointer.String("create"),
+func TestDocumentsImportWithTwoSuccessesAndOneFailure(t *testing.T) {
+	params := &api.ImportDocumentsParams{
+		Action:    pointer.Any(api.Create),
 		BatchSize: pointer.Int(40),
+		ReturnId:  pointer.Any(true),
+		ReturnDoc: pointer.Any(true),
 	}
-	expectedBody := strings.NewReader(`{"id":"123","companyName":"Stark Industries","numEmployees":5215,"country":"USA"}` +
-		"\n" + `{"id":"125","companyName":"Stark Industries","numEmployees":5215,"country":"USA"}` + "\n")
-	expectedResultString := `{"success": true}` + "\n" + `{"success": false, "error": "Bad JSON.", "document": "[bad doc"}`
+	expectedBody := `{"id":"123","companyName":"Stark Industries","numEmployees":5215,"country":"USA"}
+{"id":"125","companyName":"Stark Industries","numEmployees":5215,"country":"USA"}
+"[bad doc"
+`
+	expectedResultString := `{"success": true, "id":"123","document": {"id":"123","companyName":"Stark Industries","numEmployees":5215,"country":"USA"}}
+{"success": true, "id":"125", "document": {"id":"125","companyName":"Stark Industries","numEmployees":5215,"country":"USA"}}
+{"success": false, "id":"", "error": "Bad JSON.", "document": "[bad doc"}
+`
 	expectedResult := []*api.ImportDocumentResponse{
-		{Success: true},
-		{Success: false, Error: "Bad JSON.", Document: "[bad doc"},
+		{Success: true, Id: "123", Document: map[string]interface{}{"id": "123", "companyName": "Stark Industries", "numEmployees": float64(5215), "country": "USA"}},
+		{Success: true, Id: "125", Document: map[string]interface{}{"id": "125", "companyName": "Stark Industries", "numEmployees": float64(5215), "country": "USA"}},
+		{Success: false, Id: "", Error: "Bad JSON.", Document: "[bad doc"},
 	}
 
 	ctrl := gomock.NewController(t)
@@ -216,11 +222,15 @@ func TestDocumentsImportWithTwoDocuments(t *testing.T) {
 	mockAPIClient := mocks.NewMockAPIClientInterface(ctrl)
 
 	mockAPIClient.EXPECT().
-		ImportDocumentsWithBody(gomock.Not(gomock.Nil()),
-			"companies", expectedParams, "application/octet-stream", eqReader(expectedBody)).
+		ImportDocumentsWithBody(
+			gomock.Not(gomock.Nil()),
+			"companies",
+			params,
+			"application/octet-stream",
+			eqReader(strings.NewReader(expectedBody))).
 		Return(&http.Response{
 			StatusCode: http.StatusOK,
-			Body:       ioutil.NopCloser(strings.NewReader(expectedResultString)),
+			Body:       io.NopCloser(strings.NewReader(expectedResultString)),
 		}, nil).
 		Times(1)
 
@@ -228,10 +238,7 @@ func TestDocumentsImportWithTwoDocuments(t *testing.T) {
 	documents := []interface{}{
 		createNewDocument("123"),
 		createNewDocument("125"),
-	}
-	params := &api.ImportDocumentsParams{
-		Action:    pointer.String("create"),
-		BatchSize: pointer.Int(40),
+		"[bad doc",
 	}
 	result, err := client.Collection("companies").Documents().Import(context.Background(), documents, params)
 
@@ -241,7 +248,7 @@ func TestDocumentsImportWithTwoDocuments(t *testing.T) {
 
 func TestDocumentsImportWithActionOnly(t *testing.T) {
 	expectedParams := &api.ImportDocumentsParams{
-		Action:    pointer.String("create"),
+		Action:    pointer.Any(api.Create),
 		BatchSize: pointer.Int(defaultImportBatchSize),
 	}
 
@@ -254,7 +261,7 @@ func TestDocumentsImportWithActionOnly(t *testing.T) {
 			"companies", expectedParams, "application/octet-stream", gomock.Any()).
 		Return(&http.Response{
 			StatusCode: http.StatusOK,
-			Body:       ioutil.NopCloser(strings.NewReader(`{"success": true}`)),
+			Body:       io.NopCloser(strings.NewReader(`{"success": true}`)),
 		}, nil).
 		Times(1)
 
@@ -263,7 +270,7 @@ func TestDocumentsImportWithActionOnly(t *testing.T) {
 		createNewDocument(),
 	}
 	params := &api.ImportDocumentsParams{
-		Action: pointer.String("create"),
+		Action: pointer.Any(api.Create),
 	}
 	_, err := client.Collection("companies").Documents().Import(context.Background(), documents, params)
 	assert.Nil(t, err)
@@ -271,7 +278,7 @@ func TestDocumentsImportWithActionOnly(t *testing.T) {
 
 func TestDocumentsImportWithBatchSizeOnly(t *testing.T) {
 	expectedParams := &api.ImportDocumentsParams{
-		Action:    pointer.String("create"),
+		Action:    pointer.Any(api.Create),
 		BatchSize: pointer.Int(10),
 	}
 
@@ -284,7 +291,7 @@ func TestDocumentsImportWithBatchSizeOnly(t *testing.T) {
 			"companies", expectedParams, "application/octet-stream", gomock.Any()).
 		Return(&http.Response{
 			StatusCode: http.StatusOK,
-			Body:       ioutil.NopCloser(strings.NewReader(`{"success": true}`)),
+			Body:       io.NopCloser(strings.NewReader(`{"success": true}`)),
 		}, nil).
 		Times(1)
 
@@ -302,7 +309,7 @@ func TestDocumentsImportWithBatchSizeOnly(t *testing.T) {
 func TestDocumentsImportJsonl(t *testing.T) {
 	expectedBytes := []byte(`{"success": true}`)
 	expectedParams := &api.ImportDocumentsParams{
-		Action:    pointer.String("create"),
+		Action:    pointer.Any(api.Create),
 		BatchSize: pointer.Int(40),
 	}
 	expectedBody := createDocumentStream()
@@ -316,20 +323,20 @@ func TestDocumentsImportJsonl(t *testing.T) {
 			"companies", expectedParams, "application/octet-stream", eqReader(expectedBody)).
 		Return(&http.Response{
 			StatusCode: http.StatusOK,
-			Body:       ioutil.NopCloser(bytes.NewBuffer(expectedBytes)),
+			Body:       io.NopCloser(bytes.NewBuffer(expectedBytes)),
 		}, nil).
 		Times(1)
 
 	client := NewClient(WithAPIClient(mockAPIClient))
 	params := &api.ImportDocumentsParams{
-		Action:    pointer.String("create"),
+		Action:    pointer.Any(api.Create),
 		BatchSize: pointer.Int(40),
 	}
 	importBody := createDocumentStream()
 	result, err := client.Collection("companies").Documents().ImportJsonl(context.Background(), importBody, params)
 	assert.Nil(t, err)
 
-	resultBytes, err := ioutil.ReadAll(result)
+	resultBytes, err := io.ReadAll(result)
 	assert.Nil(t, err)
 	assert.Equal(t, string(expectedBytes), string(resultBytes))
 }
@@ -347,7 +354,7 @@ func TestDocumentsImportJsonlOnApiClientErrorReturnsError(t *testing.T) {
 
 	client := NewClient(WithAPIClient(mockAPIClient))
 	params := &api.ImportDocumentsParams{
-		Action:    pointer.String("create"),
+		Action:    pointer.Any(api.Create),
 		BatchSize: pointer.Int(40),
 	}
 	importBody := createDocumentStream()
@@ -365,13 +372,13 @@ func TestDocumentsImportJsonlOnHttpStatusErrorCodeReturnsError(t *testing.T) {
 			gomock.Any(), gomock.Any(), "application/octet-stream", gomock.Any()).
 		Return(&http.Response{
 			StatusCode: http.StatusInternalServerError,
-			Body:       ioutil.NopCloser(strings.NewReader("Internal server error")),
+			Body:       io.NopCloser(strings.NewReader("Internal server error")),
 		}, nil).
 		Times(1)
 
 	client := NewClient(WithAPIClient(mockAPIClient))
 	params := &api.ImportDocumentsParams{
-		Action:    pointer.String("create"),
+		Action:    pointer.Any(api.Create),
 		BatchSize: pointer.Int(40),
 	}
 	importBody := createDocumentStream()
@@ -381,7 +388,7 @@ func TestDocumentsImportJsonlOnHttpStatusErrorCodeReturnsError(t *testing.T) {
 
 func TestDocumentsImportJsonlWithActionOnly(t *testing.T) {
 	expectedParams := &api.ImportDocumentsParams{
-		Action:    pointer.String("create"),
+		Action:    pointer.Any(api.Create),
 		BatchSize: pointer.Int(defaultImportBatchSize),
 	}
 
@@ -394,13 +401,13 @@ func TestDocumentsImportJsonlWithActionOnly(t *testing.T) {
 			"companies", expectedParams, "application/octet-stream", gomock.Any()).
 		Return(&http.Response{
 			StatusCode: http.StatusOK,
-			Body:       ioutil.NopCloser(strings.NewReader(`{"success": true}`)),
+			Body:       io.NopCloser(strings.NewReader(`{"success": true}`)),
 		}, nil).
 		Times(1)
 
 	client := NewClient(WithAPIClient(mockAPIClient))
 	params := &api.ImportDocumentsParams{
-		Action: pointer.String("create"),
+		Action: pointer.Any(api.Create),
 	}
 	importBody := createDocumentStream()
 	_, err := client.Collection("companies").Documents().ImportJsonl(context.Background(), importBody, params)
@@ -409,7 +416,7 @@ func TestDocumentsImportJsonlWithActionOnly(t *testing.T) {
 
 func TestDocumentsImportJsonlWithBatchSizeOnly(t *testing.T) {
 	expectedParams := &api.ImportDocumentsParams{
-		Action:    pointer.String("create"),
+		Action:    pointer.Any(api.Create),
 		BatchSize: pointer.Int(10),
 	}
 
@@ -422,7 +429,7 @@ func TestDocumentsImportJsonlWithBatchSizeOnly(t *testing.T) {
 			"companies", expectedParams, "application/octet-stream", gomock.Any()).
 		Return(&http.Response{
 			StatusCode: http.StatusOK,
-			Body:       ioutil.NopCloser(strings.NewReader(`{"success": true}`)),
+			Body:       io.NopCloser(strings.NewReader(`{"success": true}`)),
 		}, nil).
 		Times(1)
 

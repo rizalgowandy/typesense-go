@@ -1,14 +1,15 @@
 package typesense
 
 import (
+	"net/http"
 	"reflect"
 	"testing"
 	"time"
 
 	"github.com/sony/gobreaker"
 	"github.com/stretchr/testify/assert"
-	"github.com/typesense/typesense-go/typesense/api"
-	"github.com/typesense/typesense-go/typesense/api/circuit"
+	"github.com/typesense/typesense-go/v4/typesense/api"
+	"github.com/typesense/typesense-go/v4/typesense/api/circuit"
 )
 
 func TestHttpError(t *testing.T) {
@@ -31,7 +32,7 @@ func TestClientConfigOptions(t *testing.T) {
 		return counts.Requests > 10 &&
 			(float64(counts.TotalFailures)/float64(counts.Requests)) > 0.4
 	}
-	onStateChange := func(name string, from gobreaker.State, to gobreaker.State) {}
+	onStateChange := func(_ string, _ gobreaker.State, _ gobreaker.State) {}
 	tests := []struct {
 		name    string
 		options []ClientOption
@@ -235,6 +236,19 @@ func TestClientConfigOptions(t *testing.T) {
 					reflect.ValueOf(onStateChange).Pointer(),
 					reflect.ValueOf(client.apiConfig.CircuitBreakerOnStateChange).Pointer(),
 					"onStateChange is not valid")
+				assert.NotNil(t, client.apiClient)
+			},
+		},
+		{
+			name: "WithCustomHTTPClient",
+			options: []ClientOption{
+				WithCustomHTTPClient(&http.Client{
+					Timeout: 10 * time.Second,
+				}),
+			},
+			verify: func(t *testing.T, client *Client) {
+				assert.NotNil(t, client.apiConfig.CustomHTTPClient)
+				assert.Equal(t, 10*time.Second, client.apiConfig.CustomHTTPClient.Timeout)
 				assert.NotNil(t, client.apiClient)
 			},
 		},

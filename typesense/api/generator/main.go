@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 	"gopkg.in/yaml.v3"
 )
 
@@ -25,7 +27,7 @@ type MapKV struct {
 }
 
 func sortedSlice(params map[string]interface{}) []MapKV {
-	var kvs []MapKV
+	kvs := []MapKV{}
 
 	for k, v := range params {
 		kvs = append(kvs, MapKV{k, v})
@@ -50,55 +52,72 @@ func main() {
 		log.Fatalf("Aboring: %s", err.Error())
 	}
 
+	processOpenAPISpec(&m)
+	writeGeneratorFile(&m)
+	generateClient()
+
+	log.Println("Successfully Completed !")
+}
+
+func processOpenAPISpec(m *yml) {
 	configFile, err := os.Open("./typesense/api/generator/openapi.yml")
 	if err != nil {
 		log.Fatalf("Unable to open config file: %s", err.Error())
-		return
 	}
 
-	decoder := yaml.NewDecoder(configFile)
-	err = decoder.Decode(&m)
+	err = yaml.NewDecoder(configFile).Decode(&m)
 	if err != nil {
 		log.Fatalf("error: %v", err)
 	}
 
 	// Unwrapping the search parameters
 	log.Println("Unwrapping search parameters and multi_search parameters")
-	unwrapSearchParameters(&m)
-	unwrapMultiSearchParameters(&m)
+	unwrapSearchParameters(m)
+	unwrapMultiSearchParameters(m)
 	// Unwrapping import and export parameters
 	log.Println("Unwrapping documents import parameters")
-	unwrapImportDocuments(&m)
+	unwrapImportDocuments(m)
 	log.Println("Unwrapping documents export parameters")
-	unwrapExportDocuments(&m)
+	unwrapExportDocuments(m)
 	// Unwrapping update documents with condition parameters
 	log.Println("Unwrapping documents update with condition parameters")
-	unwrapUpdateDocumentsWithConditionParameters(&m)
+	unwrapUpdateDocumentsWithConditionParameters(m)
 	// Unwrapping delete document parameters
 	log.Println("Unwrapping documents delete parameters")
-	unwrapDeleteDocument(&m)
+	unwrapDeleteDocument(m)
+	log.Println("Unwrapping collections get parameters")
+	unwrapGetCollections(m)
 	// Remove additionalProperties from SearchResultHit -> document
 	log.Println("Removing additionalProperties from SearchResultHit")
-	searchResultHit(&m)
+	searchResultHit(m)
+	// Keep CollectionUpdateSchema -> fields as a plain slice
+	log.Println("Skipping the optional pointer for CollectionUpdateSchema fields")
+	collectionUpdateFields(m)
+	// Extract anonymous structs to named types
+	log.Println("Extracting anonymous structs to named types")
+	extractAnonymousStructs(m)
+}
 
+func writeGeneratorFile(m *yml) {
 	log.Println("Writing updated spec to generator.yml")
 	generatorFile, err := os.Create("./typesense/api/generator/generator.yml")
 	if err != nil {
 		log.Fatalf("Unable to open config file: %s", err.Error())
-		return
 	}
 
 	encode := yaml.NewEncoder(generatorFile)
 	encode.SetIndent(2)
 	err = encode.Encode(m)
+	generatorFile.Close()
 	if err != nil {
 		log.Fatalf("error: %v", err)
 	}
+}
 
+func generateClient() {
 	// Use generator.yml to generate client_gen.go and types_gen.go
 	log.Println("Generating client")
 	oAPICodeGen()
-	log.Println("Successfully Completed !")
 }
 
 func fetchOpenAPISpec() error {
@@ -129,6 +148,22 @@ func searchResultHit(m *yml) {
 	properties := (*m)["components"].(yml)["schemas"].(yml)["SearchResultHit"].(yml)["properties"].(yml)
 	document := properties["document"].(yml)
 	delete(document, "additionalProperties")
+}
+
+// collectionUpdateFields keeps CollectionUpdateSchema -> fields generated as []Field
+// rather than *[]Field.
+//
+// The collection update endpoint accepts an update that changes only `metadata`, so
+// the spec does not list `fields` as required. oapi-codegen renders an optional array
+// as a pointer, which would break every caller constructing a CollectionUpdateSchema.
+// x-go-type-skip-optional-pointer leaves the slice unwrapped, and `omitempty` is still
+// applied because the property is optional -- so a nil or empty Fields sends no
+// `fields` key at all. That is what the endpoint needs: it rejects both `"fields":null`
+// and `"fields":[]` with a 400.
+func collectionUpdateFields(m *yml) {
+	properties := (*m)["components"].(yml)["schemas"].(yml)["CollectionUpdateSchema"].(yml)["properties"].(yml)
+	fields := properties["fields"].(yml)
+	fields["x-go-type-skip-optional-pointer"] = true
 }
 
 func unwrapDeleteDocument(m *yml) {
@@ -190,7 +225,16 @@ func unwrapImportDocuments(m *yml) {
 		newMap["name"] = obj.Key
 		newMap["in"] = query
 		newMap["schema"] = make(yml)
-		newMap["schema"].(yml)["type"] = obj.Value.(yml)["type"].(string)
+		switch {
+		// if the param is referencing a schema
+		case obj.Value.(yml)["type"] == nil:
+			newMap["schema"].(yml)["$ref"] = obj.Value.(yml)["$ref"].(string)
+		case obj.Value.(yml)["type"].(string) == array:
+			newMap["schema"].(yml)["type"] = array
+			newMap["schema"].(yml)["items"] = obj.Value.(yml)["items"]
+		default:
+			newMap["schema"].(yml)["type"] = obj.Value.(yml)["type"].(string)
+		}
 		if obj.Value.(yml)["enum"] != nil {
 			newMap["schema"].(yml)["enum"] = obj.Value.(yml)["enum"]
 		}
@@ -215,10 +259,14 @@ func unwrapSearchParameters(m *yml) {
 		newMap["in"] = query
 		newMap["schema"] = make(yml)
 		if obj.Value.(yml)["oneOf"] == nil {
-			if obj.Value.(yml)["type"].(string) == array {
+			switch {
+			// if the param is referencing a schema
+			case obj.Value.(yml)["type"] == nil:
+				newMap["schema"].(yml)["$ref"] = obj.Value.(yml)["$ref"].(string)
+			case obj.Value.(yml)["type"].(string) == array:
 				newMap["schema"].(yml)["type"] = array
 				newMap["schema"].(yml)["items"] = obj.Value.(yml)["items"]
-			} else {
+			default:
 				newMap["schema"].(yml)["type"] = obj.Value.(yml)["type"].(string)
 			}
 		} else {
@@ -241,10 +289,14 @@ func unwrapMultiSearchParameters(m *yml) {
 		newMap["in"] = query
 		newMap["schema"] = make(yml)
 		if obj.Value.(yml)["oneOf"] == nil {
-			if obj.Value.(yml)["type"].(string) == array {
+			switch {
+			// if the param is referencing a schema
+			case obj.Value.(yml)["type"] == nil:
+				newMap["schema"].(yml)["$ref"] = obj.Value.(yml)["$ref"].(string)
+			case obj.Value.(yml)["type"].(string) == array:
 				newMap["schema"].(yml)["type"] = array
 				newMap["schema"].(yml)["items"] = obj.Value.(yml)["items"]
-			} else {
+			default:
 				newMap["schema"].(yml)["type"] = obj.Value.(yml)["type"].(string)
 			}
 		} else {
@@ -255,6 +307,22 @@ func unwrapMultiSearchParameters(m *yml) {
 
 	parameters = parameters[1:]
 	(*m)["paths"].(yml)["/multi_search"].(yml)["post"].(yml)["parameters"] = parameters
+}
+
+func unwrapGetCollections(m *yml) {
+	parameters := (*m)["paths"].(yml)["/collections"].(yml)["get"].(yml)["parameters"].([]interface{})
+	deleteParameters := parameters[0].(yml)["schema"].(yml)["properties"].(yml)
+	for _, obj := range sortedSlice(deleteParameters) {
+		newMap := make(yml)
+		newMap["name"] = obj.Key
+		newMap["in"] = query
+		newMap["schema"] = make(yml)
+		newMap["schema"].(yml)["type"] = obj.Value.(yml)["type"].(string)
+		// newMap["schema"].(yml)["description"] = obj.Value.(yml)["description"].(string)
+		parameters = append(parameters, newMap)
+	}
+	parameters = parameters[1:]
+	(*m)["paths"].(yml)["/collections"].(yml)["get"].(yml)["parameters"] = parameters
 }
 
 func oAPICodeGen() {
@@ -272,4 +340,75 @@ func oAPICodeGen() {
 	if err != nil {
 		log.Printf("Error generating client_gen.go and types_gen.go: %s", err.Error())
 	}
+}
+
+// extractAnonymousStructs converts anonymous structs to named types
+func extractAnonymousStructs(m *yml) {
+	schemas := (*m)["components"].(yml)["schemas"].(yml)
+
+	// Track all anonymous structs we find
+	anonymousStructs := make(map[string]yml)
+
+	// Iterate through all schemas to find anonymous structs
+	for schemaName, schema := range schemas {
+		if schemaMap, ok := schema.(yml); ok {
+			findAnonymousStructsInSchema(schemaMap, anonymousStructs, schemaName)
+		}
+	}
+
+	// Create named types for all anonymous structs
+	for typeName, structDef := range anonymousStructs {
+		schemas[typeName] = structDef
+	}
+}
+
+// findAnonymousStructsInSchema looks for anonymous structs within a specific schema
+func findAnonymousStructsInSchema(schema yml, anonymousStructs map[string]yml, parentSchemaName string) {
+	if schema == nil || schema["properties"] == nil {
+		return
+	}
+
+	properties := schema["properties"].(yml)
+
+	// Check each property for anonymous structs
+	for propName, propSchema := range properties {
+		if propMap, ok := propSchema.(yml); ok {
+			processPropertyForAnonymousStruct(propMap, propName, parentSchemaName, anonymousStructs)
+		}
+	}
+}
+
+// processPropertyForAnonymousStruct handles the logic for processing a property that might be an anonymous struct
+func processPropertyForAnonymousStruct(propMap yml, propName, parentSchemaName string, anonymousStructs map[string]yml) {
+	if propMap["type"] == "object" && propMap["properties"] != nil {
+		// This is an anonymous struct - create a named type for it
+		typeName := parentSchemaName + cases.Title(language.English).String(propName)
+
+		createNamedType(propMap, typeName, anonymousStructs)
+
+		replaceWithReference(propMap, typeName)
+	}
+}
+
+// createNamedType creates a named type from an anonymous struct and stores it
+func createNamedType(propMap yml, typeName string, anonymousStructs map[string]yml) {
+	namedType := make(yml)
+	namedType["type"] = "object"
+	namedType["properties"] = propMap["properties"]
+	if propMap["required"] != nil {
+		namedType["required"] = propMap["required"]
+	}
+	if propMap["description"] != nil {
+		namedType["description"] = propMap["description"]
+	}
+
+	anonymousStructs[typeName] = namedType
+}
+
+// replaceWithReference replaces the anonymous struct with a reference to the named type
+func replaceWithReference(propMap yml, typeName string) {
+	for key := range propMap {
+		delete(propMap, key)
+	}
+	propMap["$ref"] = "#/components/schemas/" + typeName
 }

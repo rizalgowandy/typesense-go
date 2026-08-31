@@ -1,12 +1,16 @@
 package typesense
 
 import (
+	"bytes"
+	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/typesense/typesense-go/v4/typesense/api"
 )
 
 type serverHandler func(http.ResponseWriter, *http.Request)
@@ -22,13 +26,17 @@ func newHTTPRequest(t *testing.T, urls ...string) *http.Request {
 	return req
 }
 
-func newApiCall(apiConfig *ClientConfig) *ApiCall {
-	return NewApiCall(
+func newAPICall(apiConfig *ClientConfig) *APICall {
+	return NewAPICall(
 		&http.Client{
 			Timeout: apiConfig.ConnectionTimeout,
 		},
 		apiConfig,
 	)
+}
+
+func appendHistory(history *[]string, r *http.Request) {
+	*history = append(*history, "http://"+r.Host)
 }
 
 func instantiateServers(handlers []serverHandler) ([]*httptest.Server, []string) {
@@ -51,15 +59,15 @@ func freezeUnixMilli(msec int64) {
 // * When NearestNode is not specified
 func TestApiCallDoesNotRetryWhenStatusCodeIs3xxOr4xx(t *testing.T) {
 
-	requestUrlHistory := make([]string, 0, 2)
+	requestURLHistory := make([]string, 0, 2)
 
 	servers, serverURLs := instantiateServers([]serverHandler{
 		func(w http.ResponseWriter, r *http.Request) {
-			requestUrlHistory = append(requestUrlHistory, "http://"+r.Host)
+			appendHistory(&requestURLHistory, r)
 			w.WriteHeader(301)
 		},
 		func(w http.ResponseWriter, r *http.Request) {
-			requestUrlHistory = append(requestUrlHistory, "http://"+r.Host)
+			appendHistory(&requestURLHistory, r)
 			w.WriteHeader(409)
 		},
 	})
@@ -67,7 +75,7 @@ func TestApiCallDoesNotRetryWhenStatusCodeIs3xxOr4xx(t *testing.T) {
 		defer server.Close()
 	}
 
-	apiCall := newApiCall(
+	apiCall := newAPICall(
 		&ClientConfig{
 			Nodes:             serverURLs,
 			ConnectionTimeout: 5 * time.Second,
@@ -83,7 +91,7 @@ func TestApiCallDoesNotRetryWhenStatusCodeIs3xxOr4xx(t *testing.T) {
 	assert.NoError(t, err2)
 	assert.Equal(t, 409, res2.StatusCode)
 
-	assert.Equal(t, serverURLs, requestUrlHistory)
+	assert.Equal(t, serverURLs, requestURLHistory)
 }
 
 type timeoutError struct {
@@ -109,24 +117,24 @@ func (m *mockClient) Do(req *http.Request) (*http.Response, error) {
 	}
 }
 func TestApiCallSelectNextNodeWhenTimeOut(t *testing.T) {
-	requestUrlHistory := make([]string, 0, 3)
+	requestURLHistory := make([]string, 0, 3)
 
 	servers, serverURLs := instantiateServers([]serverHandler{
-		func(w http.ResponseWriter, r *http.Request) {
-			requestUrlHistory = append(requestUrlHistory, "http://"+r.Host)
+		func(_ http.ResponseWriter, r *http.Request) {
+			appendHistory(&requestURLHistory, r)
 		},
-		func(w http.ResponseWriter, r *http.Request) {
-			requestUrlHistory = append(requestUrlHistory, "http://"+r.Host)
+		func(_ http.ResponseWriter, r *http.Request) {
+			appendHistory(&requestURLHistory, r)
 		},
-		func(w http.ResponseWriter, r *http.Request) {
-			requestUrlHistory = append(requestUrlHistory, "http://"+r.Host)
+		func(_ http.ResponseWriter, r *http.Request) {
+			appendHistory(&requestURLHistory, r)
 		},
 	})
 	for _, server := range servers {
 		defer server.Close()
 	}
 
-	apiCall := NewApiCall(
+	apiCall := NewAPICall(
 		&mockClient{},
 		&ClientConfig{
 			Nodes:             serverURLs,
@@ -139,17 +147,17 @@ func TestApiCallSelectNextNodeWhenTimeOut(t *testing.T) {
 
 	assert.Error(t, err)
 	assert.Nil(t, res)
-	assert.Equal(t, serverURLs, requestUrlHistory)
+	assert.Equal(t, serverURLs, requestURLHistory)
 }
 func TestApiCallRemoveAndAddUnhealthyNodeIntoRotation(t *testing.T) {
-	requestUrlHistory := make([]string, 0, 8)
+	requestURLHistory := make([]string, 0, 8)
 	var count int
 
 	servers, serverURLs := instantiateServers([]serverHandler{
 		func(w http.ResponseWriter, r *http.Request) {
-			requestUrlHistory = append(requestUrlHistory, "http://"+r.Host)
+			appendHistory(&requestURLHistory, r)
 			if count > 1 {
-				// will response sucessful after 2 failed request
+				// will response successful code after 2 failed request
 				w.WriteHeader(201)
 			} else {
 				count++
@@ -157,11 +165,11 @@ func TestApiCallRemoveAndAddUnhealthyNodeIntoRotation(t *testing.T) {
 			}
 		},
 		func(w http.ResponseWriter, r *http.Request) {
-			requestUrlHistory = append(requestUrlHistory, "http://"+r.Host)
+			appendHistory(&requestURLHistory, r)
 			w.WriteHeader(501)
 		},
 		func(w http.ResponseWriter, r *http.Request) {
-			requestUrlHistory = append(requestUrlHistory, "http://"+r.Host)
+			appendHistory(&requestURLHistory, r)
 			w.WriteHeader(202)
 		},
 	})
@@ -172,7 +180,7 @@ func TestApiCallRemoveAndAddUnhealthyNodeIntoRotation(t *testing.T) {
 		apiCallTimeNow = time.Now
 	}()
 
-	apiCall := newApiCall(
+	apiCall := newAPICall(
 		&ClientConfig{
 			Nodes:               serverURLs,
 			HealthcheckInterval: 20 * time.Millisecond,
@@ -187,7 +195,7 @@ func TestApiCallRemoveAndAddUnhealthyNodeIntoRotation(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.Equal(t, 202, res.StatusCode)
-	assert.Equal(t, serverURLs, requestUrlHistory[:3])
+	assert.Equal(t, serverURLs, requestURLHistory[:3])
 
 	freezeUnixMilli(10)
 
@@ -195,7 +203,7 @@ func TestApiCallRemoveAndAddUnhealthyNodeIntoRotation(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.Equal(t, 202, res2.StatusCode)
-	assert.Equal(t, serverURLs[2], requestUrlHistory[3])
+	assert.Equal(t, serverURLs[2], requestURLHistory[3])
 
 	freezeUnixMilli(25)
 
@@ -203,7 +211,7 @@ func TestApiCallRemoveAndAddUnhealthyNodeIntoRotation(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.Equal(t, 202, res3.StatusCode)
-	assert.Equal(t, serverURLs, requestUrlHistory[4:7])
+	assert.Equal(t, serverURLs, requestURLHistory[4:7])
 
 	freezeUnixMilli(50)
 
@@ -211,19 +219,19 @@ func TestApiCallRemoveAndAddUnhealthyNodeIntoRotation(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.Equal(t, 201, res4.StatusCode)
-	assert.Equal(t, serverURLs[0], requestUrlHistory[len(requestUrlHistory)-1])
+	assert.Equal(t, serverURLs[0], requestURLHistory[len(requestURLHistory)-1])
 }
 
 // * When NearestNode is specified
 func TestApiCallWithNearestNode(t *testing.T) {
-	requestUrlHistory := make([]string, 0, 10)
+	requestURLHistory := make([]string, 0, 10)
 	var count int
 
 	servers, serverURLs := instantiateServers([]serverHandler{
 		func(w http.ResponseWriter, r *http.Request) {
-			requestUrlHistory = append(requestUrlHistory, "http://"+r.Host)
+			appendHistory(&requestURLHistory, r)
 			if count > 1 {
-				// will response sucessful after 2 failed request
+				// will response successful code after 2 failed request
 				w.WriteHeader(201)
 			} else {
 				count++
@@ -231,15 +239,15 @@ func TestApiCallWithNearestNode(t *testing.T) {
 			}
 		},
 		func(w http.ResponseWriter, r *http.Request) {
-			requestUrlHistory = append(requestUrlHistory, "http://"+r.Host)
+			appendHistory(&requestURLHistory, r)
 			w.WriteHeader(502)
 		},
 		func(w http.ResponseWriter, r *http.Request) {
-			requestUrlHistory = append(requestUrlHistory, "http://"+r.Host)
+			appendHistory(&requestURLHistory, r)
 			w.WriteHeader(503)
 		},
 		func(w http.ResponseWriter, r *http.Request) {
-			requestUrlHistory = append(requestUrlHistory, "http://"+r.Host)
+			appendHistory(&requestURLHistory, r)
 			w.WriteHeader(202)
 		},
 	})
@@ -250,7 +258,7 @@ func TestApiCallWithNearestNode(t *testing.T) {
 		apiCallTimeNow = time.Now
 	}()
 
-	apiCall := newApiCall(
+	apiCall := newAPICall(
 		&ClientConfig{
 			NearestNode:         serverURLs[0],
 			Nodes:               serverURLs[1:],
@@ -267,7 +275,7 @@ func TestApiCallWithNearestNode(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.Equal(t, 202, res.StatusCode)
-	assert.Equal(t, serverURLs, requestUrlHistory[:4])
+	assert.Equal(t, serverURLs, requestURLHistory[:4])
 
 	freezeUnixMilli(10)
 
@@ -275,7 +283,7 @@ func TestApiCallWithNearestNode(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.Equal(t, 202, res2.StatusCode)
-	assert.Equal(t, serverURLs[3], requestUrlHistory[4])
+	assert.Equal(t, serverURLs[3], requestURLHistory[4])
 
 	freezeUnixMilli(25)
 
@@ -283,7 +291,7 @@ func TestApiCallWithNearestNode(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.Equal(t, 202, res3.StatusCode)
-	assert.Equal(t, serverURLs, requestUrlHistory[5:9])
+	assert.Equal(t, serverURLs, requestURLHistory[5:9])
 
 	freezeUnixMilli(50)
 
@@ -291,12 +299,12 @@ func TestApiCallWithNearestNode(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.Equal(t, 201, res4.StatusCode)
-	assert.Equal(t, serverURLs[0], requestUrlHistory[9])
+	assert.Equal(t, serverURLs[0], requestURLHistory[9])
 
 	res5, err := apiCall.Do(req) // request should still be made to nearest node
 	assert.NoError(t, err)
 	assert.Equal(t, 201, res5.StatusCode)
-	assert.Equal(t, serverURLs[0], requestUrlHistory[len(requestUrlHistory)-1])
+	assert.Equal(t, serverURLs[0], requestURLHistory[len(requestURLHistory)-1])
 }
 
 func TestApiCallCompatibleWithServerURL(t *testing.T) {
@@ -310,7 +318,7 @@ func TestApiCallCompatibleWithServerURL(t *testing.T) {
 	})
 	defer servers[0].Close()
 
-	apiCall := newApiCall(
+	apiCall := newAPICall(
 		&ClientConfig{
 			ServerURL:         serverURLs[0],
 			ConnectionTimeout: 5 * time.Second,
@@ -328,13 +336,13 @@ func TestApiCallCanReplaceRequestHostName(t *testing.T) {
 	var lastRequestURL string
 
 	servers, serverURLs := instantiateServers([]serverHandler{
-		func(w http.ResponseWriter, r *http.Request) {
+		func(_ http.ResponseWriter, r *http.Request) {
 			lastRequestURL = "http://" + r.Host + r.RequestURI
 		},
 	})
 	defer servers[0].Close()
 
-	apiCall := newApiCall(
+	apiCall := newAPICall(
 		&ClientConfig{
 			Nodes:             serverURLs,
 			ConnectionTimeout: 5 * time.Second,
@@ -348,4 +356,92 @@ func TestApiCallCanReplaceRequestHostName(t *testing.T) {
 	assert.Equal(t, 200, res.StatusCode)
 
 	assert.Equal(t, serverURLs[0]+"/collections/1?test=1", lastRequestURL)
+}
+
+func TestApiCallCanAbortRequest(t *testing.T) {
+	requestURLHistory := make([]string, 0)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	servers, serverURLs := instantiateServers([]serverHandler{
+		func(w http.ResponseWriter, r *http.Request) {
+			appendHistory(&requestURLHistory, r)
+			w.WriteHeader(http.StatusBadGateway)
+		},
+		func(w http.ResponseWriter, r *http.Request) {
+			appendHistory(&requestURLHistory, r)
+			w.WriteHeader(http.StatusBadGateway)
+		},
+		func(_ http.ResponseWriter, r *http.Request) {
+			appendHistory(&requestURLHistory, r)
+			cancel()
+			// block until the client closes the connection
+			<-r.Context().Done()
+		},
+		func(_ http.ResponseWriter, r *http.Request) {
+			appendHistory(&requestURLHistory, r)
+		},
+	})
+	for _, server := range servers {
+		defer server.Close()
+	}
+
+	client := NewClient(
+		WithNearestNode(serverURLs[0]),
+		WithNodes(serverURLs[1:]),
+		WithRetryInterval(0),
+	)
+
+	res, err := client.Collections().Retrieve(ctx, &api.GetCollectionsParams{})
+
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Nil(t, res)
+	assert.Equal(t, requestURLHistory, serverURLs[:3])
+}
+
+func TestApiCallRetryWithRequestBody(t *testing.T) {
+
+	requestURLHistory := make([]string, 0, 2)
+
+	servers, serverURLs := instantiateServers([]serverHandler{
+		func(w http.ResponseWriter, r *http.Request) {
+			appendHistory(&requestURLHistory, r)
+			w.WriteHeader(501)
+		},
+		func(w http.ResponseWriter, r *http.Request) {
+			appendHistory(&requestURLHistory, r)
+			data := r.Body
+			bodyBytes, _ := io.ReadAll(data)
+			assert.Equal(t, string(bodyBytes), "body data")
+			w.WriteHeader(201)
+		},
+		func(w http.ResponseWriter, r *http.Request) {
+			appendHistory(&requestURLHistory, r)
+			data := r.Body
+			bodyBytes, _ := io.ReadAll(data)
+			assert.Equal(t, string(bodyBytes), "body data")
+			w.WriteHeader(203)
+		},
+	})
+	for _, server := range servers {
+		defer server.Close()
+	}
+
+	apiCall := newAPICall(
+		&ClientConfig{
+			Nodes:             serverURLs,
+			ConnectionTimeout: 5 * time.Second,
+		},
+	)
+	req, err := http.NewRequest(http.MethodPost, "http://example.com", bytes.NewBuffer([]byte("body data")))
+	assert.NoError(t, err)
+
+	res, err := apiCall.Do(req)
+	assert.NoError(t, err)
+	assert.Equal(t, 201, res.StatusCode)
+
+	res2, err2 := apiCall.Do(req)
+	assert.NoError(t, err2)
+	assert.Equal(t, 203, res2.StatusCode)
+
+	assert.Equal(t, serverURLs, requestURLHistory)
 }

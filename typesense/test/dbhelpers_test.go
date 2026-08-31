@@ -6,14 +6,57 @@ package test
 import (
 	"context"
 	"fmt"
+	"os"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
-	"github.com/typesense/typesense-go/typesense/api"
-	"github.com/typesense/typesense-go/typesense/api/pointer"
+	"github.com/typesense/typesense-go/v4/typesense/api"
+	"github.com/typesense/typesense-go/v4/typesense/api/pointer"
 )
+
+func isV30OrAbove(t *testing.T) bool {
+	t.Helper()
+
+	debug, err := typesenseClient.Debug(context.Background())
+	if err != nil {
+		t.Logf("Failed to get debug info: %v", err)
+		return false
+	}
+
+	if debug.JSON200 == nil || debug.JSON200.Version == nil {
+		t.Log("Debug response or version is nil")
+		return false
+	}
+
+	version := *debug.JSON200.Version
+	if version == "nightly" {
+		return true
+	}
+
+	var numberedVersion string
+	if strings.HasPrefix(version, "v") {
+		numberedVersion = strings.Split(version, "v")[1]
+	} else {
+		numberedVersion = version
+	}
+	parts := strings.Split(numberedVersion, ".")
+	if len(parts) == 0 {
+		t.Logf("Version parts empty: %s", numberedVersion)
+		return false
+	}
+
+	majorVersion, err := strconv.Atoi(parts[0])
+	if err != nil {
+		t.Logf("Failed to parse major version: %v", err)
+		return false
+	}
+
+	return majorVersion >= 30
+}
 
 func newUUIDName(namePrefix string) string {
 	nameUUID := uuid.New()
@@ -39,53 +82,124 @@ func newSchema(collectionName string) *api.CollectionSchema {
 				Optional: pointer.True(),
 			},
 		},
+		Metadata: &map[string]interface{}{
+			"revision": "1",
+		},
 	}
 }
 
-func expectedNewCollection(name string) *api.CollectionResponse {
+func expectedNewCollection(t *testing.T, name string) *api.CollectionResponse {
+	if !isV30OrAbove(t) {
+		return &api.CollectionResponse{
+			Name: name,
+			Fields: []api.Field{
+				{
+					Name:           "company_name",
+					Type:           "string",
+					Facet:          pointer.False(),
+					Optional:       pointer.False(),
+					Index:          pointer.True(),
+					Infix:          pointer.False(),
+					Locale:         pointer.String(""),
+					Sort:           pointer.False(),
+					Drop:           nil,
+					Store:          pointer.True(),
+					Stem:           pointer.False(),
+					StemDictionary: pointer.String(""),
+				},
+				{
+					Name:           "num_employees",
+					Type:           "int32",
+					Facet:          pointer.False(),
+					Optional:       pointer.False(),
+					Index:          pointer.True(),
+					Infix:          pointer.False(),
+					Locale:         pointer.String(""),
+					Sort:           pointer.True(),
+					Drop:           nil,
+					Store:          pointer.True(),
+					Stem:           pointer.False(),
+					StemDictionary: pointer.String(""),
+				},
+				{
+					Name:           "country",
+					Type:           "string",
+					Facet:          pointer.True(),
+					Optional:       pointer.True(),
+					Index:          pointer.True(),
+					Infix:          pointer.False(),
+					Locale:         pointer.String(""),
+					Sort:           pointer.False(),
+					Drop:           nil,
+					Store:          pointer.True(),
+					Stem:           pointer.False(),
+					StemDictionary: pointer.String(""),
+				},
+			},
+			EnableNestedFields:  pointer.False(),
+			DefaultSortingField: pointer.String(""),
+			TokenSeparators:     &[]string{},
+			SymbolsToIndex:      &[]string{},
+			NumDocuments:        pointer.Int64(0),
+			CreatedAt:           pointer.Int64(0),
+		}
+	}
 	return &api.CollectionResponse{
 		Name: name,
 		Fields: []api.Field{
 			{
-				Name:     "company_name",
-				Type:     "string",
-				Facet:    pointer.False(),
-				Optional: pointer.False(),
-				Index:    pointer.True(),
-				Infix:    pointer.False(),
-				Locale:   pointer.String(""),
-				Sort:     pointer.False(),
-				Drop:     nil,
+				Name:           "company_name",
+				Type:           "string",
+				Facet:          pointer.False(),
+				Optional:       pointer.False(),
+				Index:          pointer.True(),
+				Infix:          pointer.False(),
+				Locale:         pointer.String(""),
+				Sort:           pointer.False(),
+				Drop:           nil,
+				Store:          pointer.True(),
+				Stem:           pointer.False(),
+				StemDictionary: pointer.String(""),
 			},
 			{
-				Name:     "num_employees",
-				Type:     "int32",
-				Facet:    pointer.False(),
-				Optional: pointer.False(),
-				Index:    pointer.True(),
-				Infix:    pointer.False(),
-				Locale:   pointer.String(""),
-				Sort:     pointer.True(),
-				Drop:     nil,
+				Name:           "num_employees",
+				Type:           "int32",
+				Facet:          pointer.False(),
+				Optional:       pointer.False(),
+				Index:          pointer.True(),
+				Infix:          pointer.False(),
+				Locale:         pointer.String(""),
+				Sort:           pointer.True(),
+				Drop:           nil,
+				Store:          pointer.True(),
+				Stem:           pointer.False(),
+				StemDictionary: pointer.String(""),
 			},
 			{
-				Name:     "country",
-				Type:     "string",
-				Facet:    pointer.True(),
-				Optional: pointer.True(),
-				Index:    pointer.True(),
-				Infix:    pointer.False(),
-				Locale:   pointer.String(""),
-				Sort:     pointer.False(),
-				Drop:     nil,
+				Name:           "country",
+				Type:           "string",
+				Facet:          pointer.True(),
+				Optional:       pointer.True(),
+				Index:          pointer.True(),
+				Infix:          pointer.False(),
+				Locale:         pointer.String(""),
+				Sort:           pointer.False(),
+				Drop:           nil,
+				Store:          pointer.True(),
+				Stem:           pointer.False(),
+				StemDictionary: pointer.String(""),
 			},
 		},
 		EnableNestedFields:  pointer.False(),
 		DefaultSortingField: pointer.String(""),
 		TokenSeparators:     &[]string{},
+		SynonymSets:         &[]string{},
 		SymbolsToIndex:      &[]string{},
 		NumDocuments:        pointer.Int64(0),
 		CreatedAt:           pointer.Int64(0),
+		Metadata: &map[string]interface{}{
+			"revision": "1",
+		},
 	}
 }
 
@@ -185,90 +299,101 @@ func newKey() *api.ApiKey {
 	}
 }
 
-type newSearchOverrideSchemaOption func(*api.SearchOverrideSchema)
-
-func withOverrideRuleMatch(match api.SearchOverrideRuleMatch) newSearchOverrideSchemaOption {
-	return func(o *api.SearchOverrideSchema) {
-		o.Rule.Match = match
+func newCurationSetCreateSchema() *api.CurationSetCreateSchema {
+	return &api.CurationSetCreateSchema{
+		Items: []api.CurationItemCreateSchema{
+			{
+				Id: pointer.String("dummy"),
+				Rule: api.CurationRule{
+					Query: pointer.String("apple"),
+					Match: pointer.Any(api.Exact),
+				},
+				Includes: &[]api.CurationInclude{
+					{
+						Id: "422",
+					},
+					{
+						Id: "54",
+					},
+				},
+				Excludes: &[]api.CurationExclude{
+					{
+						Id: "287",
+					},
+				},
+				RemoveMatchedTokens: pointer.True(),
+				FilterBy:            pointer.String("category:=Electronics"),
+				StopProcessing:      pointer.True(),
+			},
+		},
+		Description: pointer.String("Test curation set"),
 	}
 }
 
-func newSearchOverrideSchema() *api.SearchOverrideSchema {
-	schema := &api.SearchOverrideSchema{
-		Rule: api.SearchOverrideRule{
-			Query: "apple",
-			Match: "exact",
-		},
-		Includes: &[]api.SearchOverrideInclude{
+func newCurationSetSchema(curationSetName string) *api.CurationSetSchema {
+	return &api.CurationSetSchema{
+		Name: curationSetName,
+		Items: []api.CurationItemCreateSchema{
 			{
-				Id:       "422",
-				Position: 1,
-			},
-			{
-				Id:       "54",
-				Position: 2,
-			},
-		},
-		Excludes: &[]api.SearchOverrideExclude{
-			{
-				Id: "287",
-			},
-		},
-		RemoveMatchedTokens: pointer.True(),
-	}
-
-	return schema
-}
-
-func newSearchOverride(overrideID string) *api.SearchOverride {
-	return &api.SearchOverride{
-		Id: pointer.String(overrideID),
-		Rule: api.SearchOverrideRule{
-			Query: "apple",
-			Match: "exact",
-		},
-		Includes: &[]api.SearchOverrideInclude{
-			{
-				Id:       "422",
-				Position: 1,
-			},
-			{
-				Id:       "54",
-				Position: 2,
+				Id: pointer.String("dummy"),
+				Rule: api.CurationRule{
+					Query: pointer.String("apple"),
+					Match: pointer.Any(api.Exact),
+				},
+				Includes: &[]api.CurationInclude{
+					{
+						Id: "422",
+					},
+					{
+						Id: "54",
+					},
+				},
+				Excludes: &[]api.CurationExclude{
+					{
+						Id: "287",
+					},
+				},
+				RemoveMatchedTokens: pointer.True(),
+				FilterBy:            pointer.String("category:=Electronics"),
+				StopProcessing:      pointer.True(),
 			},
 		},
-		Excludes: &[]api.SearchOverrideExclude{
-			{
-				Id: "287",
-			},
-		},
-		RemoveMatchedTokens: pointer.True(),
+		Description: pointer.String("Test curation set"),
 	}
 }
 
-type newSynonymOption func(*api.SearchSynonymSchema)
-
-func withSynonyms(synonyms ...string) newSynonymOption {
-	return func(s *api.SearchSynonymSchema) {
-		s.Synonyms = synonyms
+func newSynonymSetCreateSchema() *api.SynonymSetCreateSchema {
+	return &api.SynonymSetCreateSchema{
+		Items: []api.SynonymItemSchema{
+			{
+				Id:       "dummy",
+				Synonyms: []string{"foo", "bar", "baz"},
+			},
+		},
 	}
 }
 
-func newSearchSynonymSchema(opts ...newSynonymOption) *api.SearchSynonymSchema {
-	schema := &api.SearchSynonymSchema{
-		Synonyms: []string{"blazer", "coat", "jacket"},
+func newSynonymSetSchema(synonymSetName string) *api.SynonymSetSchema {
+	return &api.SynonymSetSchema{
+		Name: synonymSetName,
+		Items: []api.SynonymItemSchema{
+			{
+				Id:       "dummy",
+				Synonyms: []string{"foo", "bar", "baz"},
+			},
+		},
 	}
-	for _, opt := range opts {
-		opt(schema)
-	}
-	return schema
 }
 
-func newSearchSynonym(synonymID string) *api.SearchSynonym {
-	return &api.SearchSynonym{
-		Id:       pointer.String(synonymID),
-		Synonyms: []string{"blazer", "coat", "jacket"},
-	}
+func createNewSynonymSet(t *testing.T) (string, *api.SynonymSetSchema) {
+	t.Helper()
+	synonymSetName := newUUIDName("synonym-set-test")
+	synonymSetSchema := newSynonymSetCreateSchema()
+
+	result, err := typesenseClient.SynonymSets().Upsert(context.Background(), synonymSetName, synonymSetSchema)
+
+	require.NoError(t, err)
+	return synonymSetName, result
 }
 
 func newCollectionAlias(collectionName string, name string) *api.CollectionAlias {
@@ -281,7 +406,7 @@ func newCollectionAlias(collectionName string, name string) *api.CollectionAlias
 func newPresetFromSearchParametersUpsertSchema() *api.PresetUpsertSchema {
 	preset := &api.PresetUpsertSchema{}
 	preset.Value.FromSearchParameters(api.SearchParameters{
-		Q: "hello",
+		Q: pointer.Any("hello"),
 	})
 	return preset
 }
@@ -291,7 +416,7 @@ func newPresetFromSearchParameters(presetName string) *api.PresetSchema {
 		Name: presetName,
 	}
 	preset.Value.FromSearchParameters(api.SearchParameters{
-		Q: "hello",
+		Q: pointer.Any("hello"),
 	})
 	return preset
 }
@@ -301,7 +426,7 @@ func newPresetFromMultiSearchSearchesParameterUpsertSchema() *api.PresetUpsertSc
 	preset.Value.FromMultiSearchSearchesParameter(api.MultiSearchSearchesParameter{
 		Searches: []api.MultiSearchCollectionParameters{
 			{
-				Collection: "test",
+				Collection: pointer.Any("test"),
 			},
 		},
 	})
@@ -315,11 +440,48 @@ func newPresetFromMultiSearchSearchesParameter(presetName string) *api.PresetSch
 	preset.Value.FromMultiSearchSearchesParameter(api.MultiSearchSearchesParameter{
 		Searches: []api.MultiSearchCollectionParameters{
 			{
-				Collection: "test",
+				Collection: pointer.Any("test"),
 			},
 		},
 	})
 	return preset
+}
+
+func newAnalyticsRule(ruleName string, collectionName string, sourceCollectionName string, eventName string) *api.AnalyticsRule {
+	return &api.AnalyticsRule{
+		Name:       ruleName,
+		Type:       api.Counter,
+		Collection: collectionName,
+		EventType:  "click",
+		Params: &api.AnalyticsRuleCreateParams{
+			CounterField: pointer.String("num_employees"),
+			Weight:       pointer.Int(1),
+		},
+	}
+}
+
+func createNewAnalyticsRule(t *testing.T, collectionName string, sourceCollectionName string, eventName string) *api.AnalyticsRule {
+	t.Helper()
+	ruleName := newUUIDName("test-rule")
+
+	// Create the rule using the new API
+	ruleCreate := &api.AnalyticsRuleCreate{
+		Name:       ruleName,
+		Type:       api.Counter,
+		Collection: collectionName,
+		EventType:  "click",
+		Params: &api.AnalyticsRuleCreateParams{
+			CounterField: pointer.String("num_employees"),
+			Weight:       pointer.Int(1),
+		},
+	}
+
+	// Create the rule via the API
+	_, err := typesenseClient.Analytics().Rules().Create(context.Background(), []*api.AnalyticsRuleCreate{ruleCreate})
+	require.NoError(t, err)
+
+	// Return the expected rule structure
+	return newAnalyticsRule(ruleName, collectionName, sourceCollectionName, eventName)
 }
 
 func createNewCollection(t *testing.T, namePrefix string) string {
@@ -334,7 +496,7 @@ func createNewCollection(t *testing.T, namePrefix string) string {
 
 func createDocument(t *testing.T, collectionName string, document *testDocument) {
 	t.Helper()
-	_, err := typesenseClient.Collection(collectionName).Documents().Create(context.Background(), document)
+	_, err := typesenseClient.Collection(collectionName).Documents().Create(context.Background(), document, &api.DocumentIndexParameters{})
 	require.NoError(t, err)
 }
 
@@ -371,4 +533,78 @@ func retrieveDocuments(t *testing.T, collectionName string, docIDs ...string) []
 		results[i] = doc
 	}
 	return results
+}
+
+func newNLSearchModelCreateSchema() *api.NLSearchModelCreateSchema {
+	apiKey := os.Getenv("NL_SEARCH_MODEL_API_KEY")
+
+	return &api.NLSearchModelCreateSchema{
+		ModelName:     pointer.String("openai/gpt-3.5-turbo"),
+		ApiKey:        pointer.String(apiKey),
+		MaxBytes:      pointer.Int(1000),
+		Temperature:   pointer.Float32(0.7),
+		SystemPrompt:  pointer.String("You are a helpful assistant."),
+		TopP:          pointer.Float32(0.9),
+		TopK:          pointer.Int(40),
+		StopSequences: &[]string{"END", "STOP"},
+		ApiVersion:    pointer.String("v1"),
+	}
+}
+
+func newNLSearchModelSchema(modelID string) *api.NLSearchModelSchema {
+	apiKey := os.Getenv("NL_SEARCH_MODEL_API_KEY")
+
+	return &api.NLSearchModelSchema{
+		Id:            modelID,
+		ModelName:     pointer.String("openai/gpt-3.5-turbo"),
+		ApiKey:        pointer.String(apiKey),
+		MaxBytes:      pointer.Int(1000),
+		Temperature:   pointer.Float32(0.7),
+		SystemPrompt:  pointer.String("You are a helpful assistant."),
+		TopP:          pointer.Float32(0.9),
+		TopK:          pointer.Int(40),
+		StopSequences: &[]string{"END", "STOP"},
+		ApiVersion:    pointer.String("v1"),
+	}
+}
+
+func newNLSearchModelUpdateSchema() *api.NLSearchModelUpdateSchema {
+	apiKey := os.Getenv("NL_SEARCH_MODEL_API_KEY")
+
+	return &api.NLSearchModelUpdateSchema{
+		ModelName:     pointer.String("openai/gpt-4"),
+		ApiKey:        pointer.String(apiKey),
+		MaxBytes:      pointer.Int(2000),
+		Temperature:   pointer.Float32(0.5),
+		SystemPrompt:  pointer.String("You are an expert assistant."),
+		TopP:          pointer.Float32(0.8),
+		TopK:          pointer.Int(50),
+		StopSequences: &[]string{"END", "STOP", "QUIT"},
+		ApiVersion:    pointer.String("v1"),
+	}
+}
+
+func shouldSkipNLSearchModelTests(t *testing.T) {
+	if os.Getenv("NL_SEARCH_MODEL_API_KEY") == "" {
+
+		t.Skip("Skipping NL search model test: NL_SEARCH_MODEL_API_KEY not set")
+	}
+}
+
+func shouldSkipAnalyticsTests(t *testing.T) {
+	if !isV30OrAbove(t) {
+		t.Skip("Skipping analytics tests: requires Typesense v30 or above")
+	}
+}
+
+func createNewNLSearchModel(t *testing.T) (string, *api.NLSearchModelSchema) {
+	t.Helper()
+	modelID := newUUIDName("nl-model-test")
+	modelSchema := newNLSearchModelCreateSchema()
+	modelSchema.Id = pointer.String(modelID)
+
+	result, err := typesenseClient.NLSearchModels().Create(context.Background(), modelSchema)
+
+	require.NoError(t, err)
+	return modelID, result
 }

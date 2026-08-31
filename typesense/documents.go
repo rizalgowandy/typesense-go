@@ -1,37 +1,37 @@
 package typesense
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 
-	"github.com/typesense/typesense-go/typesense/api"
+	"github.com/typesense/typesense-go/v4/typesense/api"
+	"github.com/typesense/typesense-go/v4/typesense/api/pointer"
 )
-
-var upsertAction api.IndexDocumentParamsAction = "upsert"
 
 const (
 	defaultImportBatchSize = 40
-	defaultImportAction    = "create"
 )
 
 // DocumentsInterface is a type for Documents API operations
 type DocumentsInterface interface {
 	// Create returns indexed document
-	Create(ctx context.Context, document interface{}) (map[string]interface{}, error)
+	Create(ctx context.Context, document interface{}, params *api.DocumentIndexParameters) (map[string]interface{}, error)
 	// Update updates documents matching the filter_by condition
 	Update(ctx context.Context, updateFields interface{}, params *api.UpdateDocumentsParams) (int, error)
 	// Upsert returns indexed/updated document
-	Upsert(context.Context, interface{}) (map[string]interface{}, error)
+	Upsert(ctx context.Context, document interface{}, params *api.DocumentIndexParameters) (map[string]interface{}, error)
 	// Delete returns number of deleted documents
 	Delete(ctx context.Context, filter *api.DeleteDocumentsParams) (int, error)
 	// Search performs document search in collection
 	Search(ctx context.Context, params *api.SearchCollectionParams) (*api.SearchResult, error)
 	// Export returns all documents from index in jsonl format
-	Export(ctx context.Context) (io.ReadCloser, error)
+	Export(ctx context.Context, params *api.ExportDocumentsParams) (io.ReadCloser, error)
 	// Import returns json array. Each item of the response indicates
 	// the result of each document present in the request body (in the same order).
 	Import(ctx context.Context, documents []interface{}, params *api.ImportDocumentsParams) ([]*api.ImportDocumentResponse, error)
@@ -59,8 +59,8 @@ func (d *documents) indexDocument(ctx context.Context, document interface{}, par
 	return *response.JSON201, nil
 }
 
-func (d *documents) Create(ctx context.Context, document interface{}) (map[string]interface{}, error) {
-	return d.indexDocument(ctx, document, &api.IndexDocumentParams{})
+func (d *documents) Create(ctx context.Context, document interface{}, params *api.DocumentIndexParameters) (map[string]interface{}, error) {
+	return d.indexDocument(ctx, document, &api.IndexDocumentParams{DirtyValues: params.DirtyValues})
 }
 
 func (d *documents) Update(ctx context.Context, updateFields interface{}, params *api.UpdateDocumentsParams) (int, error) {
@@ -75,8 +75,8 @@ func (d *documents) Update(ctx context.Context, updateFields interface{}, params
 	return response.JSON200.NumUpdated, nil
 }
 
-func (d *documents) Upsert(ctx context.Context, document interface{}) (map[string]interface{}, error) {
-	return d.indexDocument(ctx, document, &api.IndexDocumentParams{Action: &upsertAction})
+func (d *documents) Upsert(ctx context.Context, document interface{}, params *api.DocumentIndexParameters) (map[string]interface{}, error) {
+	return d.indexDocument(ctx, document, &api.IndexDocumentParams{Action: pointer.Any(api.Upsert), DirtyValues: params.DirtyValues})
 }
 
 func (d *documents) Delete(ctx context.Context, filter *api.DeleteDocumentsParams) (int, error) {
@@ -103,8 +103,8 @@ func (d *documents) Search(ctx context.Context, params *api.SearchCollectionPara
 	return response.JSON200, nil
 }
 
-func (d *documents) Export(ctx context.Context) (io.ReadCloser, error) {
-	response, err := d.apiClient.ExportDocuments(ctx, d.collectionName, &api.ExportDocumentsParams{})
+func (d *documents) Export(ctx context.Context, params *api.ExportDocumentsParams) (io.ReadCloser, error) {
+	response, err := d.apiClient.ExportDocuments(ctx, d.collectionName, params)
 	if err != nil {
 		return nil, err
 	}
@@ -122,8 +122,7 @@ func initImportParams(params *api.ImportDocumentsParams) {
 		*params.BatchSize = defaultImportBatchSize
 	}
 	if params.Action == nil {
-		params.Action = new(string)
-		*params.Action = defaultImportAction
+		params.Action = pointer.Any(api.Create)
 	}
 }
 
@@ -144,18 +143,20 @@ func (d *documents) Import(ctx context.Context, documents []interface{}, params 
 	if err != nil {
 		return nil, err
 	}
+	defer response.Close()
 
 	var result []*api.ImportDocumentResponse
-	jsonDecoder := json.NewDecoder(response)
-	for jsonDecoder.More() {
+	scanner := bufio.NewScanner(response)
+	scanner.Split(bufio.ScanLines)
+	for scanner.Scan() {
 		var docResult *api.ImportDocumentResponse
-		if err := jsonDecoder.Decode(&docResult); err != nil {
-			return result, errors.New("failed to decode result")
+		if err := json.Unmarshal(scanner.Bytes(), &docResult); err != nil {
+			return result, fmt.Errorf("failed to decode result: %w", err)
 		}
 		result = append(result, docResult)
 	}
 
-	return result, nil
+	return result, scanner.Err()
 }
 
 func (d *documents) ImportJsonl(ctx context.Context, body io.Reader, params *api.ImportDocumentsParams) (io.ReadCloser, error) {

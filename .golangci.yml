@@ -1,33 +1,56 @@
+version: "2"
 linters:
   enable:
+    - copyloopvar
     - dogsled
-    - exportloopref
     - funlen
     - gocognit
     - goconst
     - gocritic
     - gocyclo
-    - gofmt
-    - goimports
-    - golint
     - gosec
-    - maligned
     - misspell
     - nestif
     - prealloc
-    - unconvert
+    - revive
     - unparam
-  disable:
-    - structcheck
-
-run:
-  timeout: 3m
-
-issues:
-  exclude-rules:
-    - linters:
-        - gosec
-      text: "G404"
-    - linters:
-        - funlen
-      path: _test\.go
+  settings:
+    revive:
+      rules:
+        - name: var-naming
+          arguments:
+            - - ID
+          severity: warning
+          exclude:
+            - ""
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - gosec
+        text: G404
+      - linters:
+          - funlen
+        path: _test\.go
+      - linters:
+          - errcheck
+        path: _test\.go
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
